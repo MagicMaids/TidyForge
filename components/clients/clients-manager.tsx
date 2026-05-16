@@ -15,7 +15,13 @@ interface Client {
   name: string
   email: string
   phone: string | null
-  properties: { count: number }[]
+  relationship: {
+    id: string
+    relationship_status: string
+    pricing_tier: string
+    internal_notes: string | null
+  }
+  properties_count: number
 }
 
 export function ClientsManager({ companyId, userRole }: { companyId: string; userRole: string }) {
@@ -27,21 +33,50 @@ export function ClientsManager({ companyId, userRole }: { companyId: string; use
     const supabase = createBrowserClient()
 
     const { data, error } = await supabase
-      .from("clients")
+      .from("company_client_relationships")
       .select(
         `
         id,
-        name,
-        email,
-        phone,
-        properties:properties(count)
+        relationship_status,
+        pricing_tier,
+        internal_notes,
+        clients:client_id (
+          id,
+          name,
+          email,
+          phone
+        )
       `,
       )
       .eq("company_id", companyId)
-      .order("name")
+      .eq("relationship_status", "active")
 
     if (!error && data) {
-      setClients(data as Client[])
+      const clientsWithCounts = await Promise.all(
+        data.map(async (rel: any) => {
+          const { count } = await supabase
+            .from("properties")
+            .select("*", { count: "exact", head: true })
+            .eq("client_id", rel.clients.id)
+            .eq("company_id", companyId)
+
+          return {
+            id: rel.clients.id,
+            name: rel.clients.name,
+            email: rel.clients.email,
+            phone: rel.clients.phone,
+            relationship: {
+              id: rel.id,
+              relationship_status: rel.relationship_status,
+              pricing_tier: rel.pricing_tier,
+              internal_notes: rel.internal_notes,
+            },
+            properties_count: count || 0,
+          }
+        }),
+      )
+
+      setClients(clientsWithCounts as Client[])
     }
     setLoading(false)
   }
@@ -146,7 +181,7 @@ export function ClientsManager({ companyId, userRole }: { companyId: string; use
                         <TableCell>
                           <Badge variant="secondary" className="gap-1">
                             <Home className="h-3 w-3" />
-                            {client.properties[0]?.count || 0} properties
+                            {client.properties_count} properties
                           </Badge>
                         </TableCell>
                       </TableRow>

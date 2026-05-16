@@ -1,27 +1,48 @@
-import { redirect } from "next/navigation"
-import { createServerClient } from "@/lib/supabase/server"
+"use client"
+
+import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
+import { createBrowserClient } from "@/lib/supabase/client"
 import { MobileJobsList } from "@/components/mobile/mobile-jobs-list"
 
-export default async function MobilePage() {
-  const supabase = await createServerClient()
+export default function MobilePage() {
+  const router = useRouter()
+  const [userData, setUserData] = useState<any>(null)
+  const [userId, setUserId] = useState<string>("")
+  const [loading, setLoading] = useState(true)
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  useEffect(() => {
+    async function checkUser() {
+      const supabase = createBrowserClient()
+      const user = await supabase.auth.getUser()
 
-  if (!user) {
-    redirect("/auth/login")
+      if (!user) {
+        router.push("/auth/login")
+        return
+      }
+
+      const { data } = await supabase.from("users").select("company_id, role, full_name").eq("id", user.id).single()
+
+      if (!data?.company_id) {
+        router.push("/onboarding")
+        return
+      }
+
+      setUserData(data)
+      setUserId(user.id)
+      setLoading(false)
+    }
+
+    checkUser()
+  }, [router])
+
+  if (loading || !userData) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-muted-foreground">Loading...</div>
+      </div>
+    )
   }
 
-  const { data: userData } = await supabase
-    .from("users")
-    .select("company_id, role, full_name")
-    .eq("id", user.id)
-    .single()
-
-  if (!userData?.company_id) {
-    redirect("/onboarding")
-  }
-
-  return <MobileJobsList companyId={userData.company_id} userId={user.id} userName={userData.full_name} />
+  return <MobileJobsList companyId={userData.company_id} userId={userId} userName={userData.full_name} />
 }

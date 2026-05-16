@@ -1,9 +1,7 @@
 "use client"
 
 import type React from "react"
-
 import { createClient } from "@/lib/supabase/client"
-import { signInWithGoogleAction } from "@/lib/supabase/actions"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -26,10 +24,7 @@ export default function LoginPage() {
     setError(null)
 
     try {
-      console.log("[v0] Creating Supabase client for login")
       const supabase = createClient()
-
-      console.log("[v0] Attempting login with email:", email)
 
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
         email,
@@ -37,10 +32,9 @@ export default function LoginPage() {
       })
 
       if (signInError) {
-        console.error("[v0] Login error:", signInError)
-        if (signInError.message.includes("Invalid login credentials")) {
+        if (signInError.message?.includes("Invalid login credentials")) {
           setError("Invalid email or password. Please try again.")
-        } else if (signInError.message.includes("Email not confirmed")) {
+        } else if (signInError.message?.includes("Email not confirmed")) {
           setError("Please verify your email address before signing in.")
         } else {
           setError(`Login failed: ${signInError.message}`)
@@ -49,9 +43,50 @@ export default function LoginPage() {
       }
 
       if (data.user) {
-        console.log("[v0] Login successful, user ID:", data.user.id)
-        router.push("/dashboard")
-        router.refresh()
+        const { data: systemRoles } = await supabase
+          .from("user_system_roles")
+          .select(`system_roles (name)`)
+          .eq("user_id", data.user.id)
+
+        const hasAdminRole = systemRoles?.some((role: any) =>
+          ["super_admin", "platform_admin", "developer", "support", "analyst"].includes(role.system_roles?.name),
+        )
+
+        if (hasAdminRole) {
+          window.location.href = "/admin"
+          return
+        }
+
+        // Check if user has a users table record (company staff)
+        const { data: userRecord } = await supabase
+          .from("users")
+          .select("account_type, company_id")
+          .eq("id", data.user.id)
+          .maybeSingle()
+
+        if (userRecord) {
+          // Company staff or client with user record
+          if (userRecord.account_type === "client") {
+            window.location.href = "/client-portal"
+          } else {
+            window.location.href = "/dashboard"
+          }
+          return
+        }
+
+        // Check if they're a client portal user
+        const { data: clientPortalUser } = await supabase
+          .from("client_portal_users")
+          .select("id")
+          .eq("auth_user_id", data.user.id)
+          .maybeSingle()
+
+        if (clientPortalUser) {
+          window.location.href = "/client-portal"
+        } else {
+          // No record found, send to onboarding
+          window.location.href = "/onboarding"
+        }
       }
     } catch (error: unknown) {
       console.error("[v0] Unexpected login error:", error)
@@ -65,7 +100,26 @@ export default function LoginPage() {
     setIsGoogleLoading(true)
     setError(null)
     try {
-      await signInWithGoogleAction()
+      const supabase = createClient()
+
+      const { data, error: oauthError } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+        },
+      })
+
+      if (oauthError) {
+        console.error("[v0] Google sign-in error:", oauthError)
+        setError("Failed to initialize Google sign-in. Please try again.")
+        setIsGoogleLoading(false)
+        return
+      }
+
+      if (data.url) {
+        // Redirect to Google OAuth
+        window.location.href = data.url
+      }
     } catch (error: unknown) {
       console.error("[v0] Google sign-in error:", error)
       setError(error instanceof Error ? error.message : "An error occurred with Google sign-in")

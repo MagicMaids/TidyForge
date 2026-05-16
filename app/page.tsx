@@ -1,21 +1,9 @@
-import { createClient } from "@/lib/supabase/server"
-import { redirect } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { CheckCircle2 } from "lucide-react"
 
-export default async function HomePage() {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  // If user is logged in, redirect to dashboard
-  if (user) {
-    redirect("/dashboard")
-  }
-
+export default function HomePage() {
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}

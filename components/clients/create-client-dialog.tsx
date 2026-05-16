@@ -40,18 +40,34 @@ export function CreateClientDialog({
 
     const supabase = createBrowserClient()
 
-    const { error } = await supabase.from("clients").insert({
+    const { data: newClient, error: clientError } = await supabase
+      .from("clients")
+      .insert({
+        name: formData.name,
+        email: formData.email,
+        phone: formData.phone || null,
+      })
+      .select()
+      .single()
+
+    if (clientError) {
+      setLoading(false)
+      toast.error("Failed to create client")
+      console.error(clientError)
+      return
+    }
+
+    const { error: relationshipError } = await supabase.from("company_client_relationships").insert({
       company_id: companyId,
-      name: formData.name,
-      email: formData.email,
-      phone: formData.phone || null,
+      client_id: newClient.id,
+      relationship_status: "active",
     })
 
     setLoading(false)
 
-    if (error) {
-      toast.error("Failed to create client")
-      console.error(error)
+    if (relationshipError) {
+      toast.error("Failed to link client to company")
+      console.error(relationshipError)
       return
     }
 

@@ -1,18 +1,19 @@
 "use client"
 
 import type React from "react"
-
 import { createClient } from "@/lib/supabase/client"
-import { signInWithGoogleAction } from "@/lib/supabase/actions"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
+import { Building2, Home, Users } from "lucide-react"
 
 export default function SignUpPage() {
+  const [accountType, setAccountType] = useState<"company" | "client" | "staff">("company")
   const [companyName, setCompanyName] = useState("")
   const [fullName, setFullName] = useState("")
   const [email, setEmail] = useState("")
@@ -42,32 +43,42 @@ export default function SignUpPage() {
     }
 
     try {
-      console.log("[v0] Creating Supabase client for sign-up")
       const supabase = createClient()
 
-      console.log("[v0] Attempting sign-up with email:", email)
+      const nextPath =
+        accountType === "company"
+          ? "/onboarding/company"
+          : accountType === "staff"
+            ? "/onboarding/staff"
+            : "/onboarding/client"
+
+      const redirectUrl =
+        typeof window !== "undefined"
+          ? `${window.location.origin}/auth/callback?next=${nextPath}`
+          : `${process.env.NEXT_PUBLIC_SUPABASE_REDIRECT_URL || "http://localhost:3000"}/auth/callback?next=${nextPath}`
 
       const { data, error: signUpError } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          emailRedirectTo: process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL || `${window.location.origin}/onboarding`,
+          emailRedirectTo: redirectUrl,
           data: {
             full_name: fullName,
-            company_name: companyName,
+            company_name: accountType === "company" ? companyName : undefined,
             phone: phone,
-            role: "admin",
+            account_type:
+              accountType === "company" ? "company_staff" : accountType === "staff" ? "company_staff" : "client",
+            role: accountType === "company" ? "admin" : accountType === "staff" ? "cleaner" : "client",
           },
         },
       })
 
       if (signUpError) {
-        console.error("[v0] Sign-up error:", signUpError)
-        if (signUpError.message.includes("User already registered")) {
+        if (signUpError.message?.includes("User already registered")) {
           setError("An account with this email already exists. Please sign in instead.")
-        } else if (signUpError.message.includes("Password should be")) {
+        } else if (signUpError.message?.includes("Password should be")) {
           setError("Password must be at least 6 characters long.")
-        } else if (signUpError.message.includes("Invalid email")) {
+        } else if (signUpError.message?.includes("Invalid email")) {
           setError("Please enter a valid email address.")
         } else {
           setError(`Sign-up failed: ${signUpError.message}`)
@@ -76,7 +87,6 @@ export default function SignUpPage() {
       }
 
       if (data.user) {
-        console.log("[v0] Sign-up successful, user created:", data.user.id)
         router.push("/auth/sign-up-success")
       }
     } catch (error: unknown) {
@@ -91,7 +101,42 @@ export default function SignUpPage() {
     setIsGoogleLoading(true)
     setError(null)
     try {
-      await signInWithGoogleAction()
+      const supabase = createClient()
+
+      const nextPath =
+        accountType === "company"
+          ? "/onboarding/company"
+          : accountType === "staff"
+            ? "/onboarding/staff"
+            : "/onboarding/client"
+
+      const origin = typeof window !== "undefined" ? window.location.origin : ""
+      const redirectTo = `${origin}/auth/callback?next=${encodeURIComponent(nextPath)}&account_type=${accountType}`
+
+      console.log("[v0] Google OAuth redirect URL:", redirectTo)
+
+      const { data, error: oauthError } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo,
+          queryParams: {
+            access_type: "offline",
+            prompt: "consent",
+          },
+        },
+      })
+
+      if (oauthError) {
+        console.error("[v0] Google sign-up error:", oauthError)
+        setError("Failed to initialize Google sign-in. Please try again.")
+        setIsGoogleLoading(false)
+        return
+      }
+
+      if (data.url) {
+        console.log("[v0] Redirecting to Google OAuth:", data.url)
+        window.location.href = data.url
+      }
     } catch (error: unknown) {
       console.error("[v0] Google sign-up error:", error)
       setError(error instanceof Error ? error.message : "An error occurred with Google sign-in")
@@ -113,11 +158,62 @@ export default function SignUpPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-2xl">Create Your Account</CardTitle>
-              <CardDescription>Start your 14-day free trial. No credit card required.</CardDescription>
+              <CardDescription>Choose your account type to get started</CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSignUp}>
                 <div className="flex flex-col gap-4">
+                  <div className="grid gap-3">
+                    <Label>Account Type</Label>
+                    <RadioGroup
+                      value={accountType}
+                      onValueChange={(value) => setAccountType(value as "company" | "client" | "staff")}
+                    >
+                      <div className="flex items-center space-x-2 border rounded-lg p-4 cursor-pointer hover:bg-muted/50">
+                        <RadioGroupItem value="company" id="company" />
+                        <Label htmlFor="company" className="flex-1 cursor-pointer">
+                          <div className="flex items-start gap-3">
+                            <Building2 className="h-5 w-5 text-primary mt-0.5" />
+                            <div>
+                              <div className="font-medium">Cleaning Company</div>
+                              <div className="text-sm text-muted-foreground">
+                                Manage properties, schedule jobs, and coordinate your team
+                              </div>
+                            </div>
+                          </div>
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2 border rounded-lg p-4 cursor-pointer hover:bg-muted/50">
+                        <RadioGroupItem value="staff" id="staff" />
+                        <Label htmlFor="staff" className="flex-1 cursor-pointer">
+                          <div className="flex items-start gap-3">
+                            <Users className="h-5 w-5 text-primary mt-0.5" />
+                            <div>
+                              <div className="font-medium">Staff Member / Cleaner</div>
+                              <div className="text-sm text-muted-foreground">
+                                Join a cleaning company to manage jobs and schedules
+                              </div>
+                            </div>
+                          </div>
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2 border rounded-lg p-4 cursor-pointer hover:bg-muted/50">
+                        <RadioGroupItem value="client" id="client" />
+                        <Label htmlFor="client" className="flex-1 cursor-pointer">
+                          <div className="flex items-start gap-3">
+                            <Home className="h-5 w-5 text-primary mt-0.5" />
+                            <div>
+                              <div className="font-medium">Property Owner / Host</div>
+                              <div className="text-sm text-muted-foreground">
+                                Manage your properties and coordinate cleaning services
+                              </div>
+                            </div>
+                          </div>
+                        </Label>
+                      </div>
+                    </RadioGroup>
+                  </div>
+
                   <Button
                     type="button"
                     variant="outline"
@@ -155,24 +251,29 @@ export default function SignUpPage() {
                     </div>
                   </div>
 
+                  {accountType === "company" && (
+                    <div className="grid gap-2">
+                      <Label htmlFor="company-name">Company Name</Label>
+                      <Input
+                        id="company-name"
+                        type="text"
+                        placeholder="Sparkle Clean Co."
+                        required
+                        value={companyName}
+                        onChange={(e) => setCompanyName(e.target.value)}
+                        disabled={isLoading || isGoogleLoading}
+                      />
+                    </div>
+                  )}
+
                   <div className="grid gap-2">
-                    <Label htmlFor="company-name">Company Name</Label>
-                    <Input
-                      id="company-name"
-                      type="text"
-                      placeholder="Sparkle Clean Co."
-                      required
-                      value={companyName}
-                      onChange={(e) => setCompanyName(e.target.value)}
-                      disabled={isLoading || isGoogleLoading}
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="full-name">Your Full Name</Label>
+                    <Label htmlFor="full-name">{accountType === "company" ? "Your Full Name" : "Full Name"}</Label>
                     <Input
                       id="full-name"
                       type="text"
-                      placeholder="John Doe"
+                      placeholder={
+                        accountType === "company" ? "John Doe" : accountType === "staff" ? "Jane Doe" : "Jane Smith"
+                      }
                       required
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
