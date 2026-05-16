@@ -1,6 +1,7 @@
 "use server"
 
 import { createClient } from "@/lib/supabase/server"
+import { createServiceRoleClient } from "@/lib/supabase/service-role"
 import { revalidatePath } from "next/cache"
 import { scrapeAirbnbListing } from "@/lib/airbnb-scraper"
 import { parseIcal } from "@/lib/ical-parser"
@@ -603,13 +604,35 @@ export async function deleteCompanyProperty(propertyId: string) {
     }
 
     // Get user's company
-    const { data: userData } = await supabase.from("users").select("company_id").eq("id", user.id).single()
+    const { data: userData } = await supabase.from("users").select("company_id, role").eq("id", user.id).single()
 
     if (!userData?.company_id) {
       return { success: false, error: "No company associated with your account" }
     }
 
-    const { error: jobsError } = await supabase
+    // Check user has permission (admin or manager)
+    if (!["admin", "manager"].includes(userData.role)) {
+      return { success: false, error: "You do not have permission to remove properties" }
+    }
+
+    // Verify property belongs to this company before removing
+    const { data: property } = await supabase
+      .from("properties")
+      .select("id, company_id")
+      .eq("id", propertyId)
+      .eq("company_id", userData.company_id)
+      .single()
+
+    if (!property) {
+      return { success: false, error: "Property not found or does not belong to your company" }
+    }
+
+    // Use service role client to bypass RLS for the update
+    // This is necessary because the RLS policy doesn't allow setting company_id to null
+    const serviceClient = createServiceRoleClient()
+
+    // Delete pending jobs (not completed ones - those are kept for history)
+    const { error: jobsError } = await serviceClient
       .from("jobs")
       .delete()
       .eq("property_id", propertyId)
@@ -623,14 +646,13 @@ export async function deleteCompanyProperty(propertyId: string) {
 
     // Remove company association by setting company_id to null
     // This keeps the property in the system so the client can reassign it
-    const { error: updateError } = await supabase
+    const { error: updateError } = await serviceClient
       .from("properties")
       .update({
         company_id: null,
         sync_enabled: false, // Disable auto-sync when removing company
       })
       .eq("id", propertyId)
-      .eq("company_id", userData.company_id)
 
     if (updateError) {
       console.error("[v0] Property removal error:", updateError)
